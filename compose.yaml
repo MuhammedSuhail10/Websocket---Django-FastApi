@@ -1,0 +1,114 @@
+services:
+  db:
+    image: mysql:8.0
+    restart: always
+    container_name: ludo_mysql_db
+    env_file:
+      - .env
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ludo_backend
+    restart: always
+    ports:
+      - "8000:8000"
+    command: >
+      gunicorn BagheeraLudo.asgi:application --workers 4 --bind 0.0.0.0:8000 --worker-class uvicorn.workers.UvicornWorker
+    volumes:
+      - .:/BagheeraLudo
+      - pip_cache:/root/.cache/pip
+    env_file:
+      - .env
+    depends_on:
+      - migrate_db
+      - db
+
+  nginx:
+    image: nginx:alpine
+    container_name: ludo_nginx
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf
+      - .:/BagheeraLudo  
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+    depends_on:
+      - backend
+
+  migrate_db:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ludo_backend_migration
+    # restart: always
+    command: >
+      sh -c "python3 manage.py makemigrations --noinput &&
+             python3 manage.py migrate --database=default --noinput && python3 manage.py collectstatic --noinput &&
+             python3 manage.py createcachetable"
+    volumes:
+      - .:/BagheeraLudo
+      - pip_cache:/root/.cache/pip
+    env_file:
+      - .env
+    depends_on:
+      - db 
+
+  create_admin:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ludo_create_admin
+    command: >
+      sh -c "python3 manage.py superuser"
+    volumes:
+      - .:/BagheeraLudo
+      - pip_cache:/root/.cache/pip
+    env_file: 
+      - .env
+    depends_on:
+      - db
+      - migrate_db
+  
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+
+  # celery:
+  #   image: ${DOCKER_IMAGE:-your-registry/your-app:latest}
+  #   restart: unless-stopped
+  #   command: celery -A your_project worker -l info
+  #   volumes:
+  #     - media_volume:/app/media
+  #   env_file:
+  #     - .env
+  #   depends_on:
+  #     - db
+  #     - redis
+
+  # celery-beat:
+  #   image: ${DOCKER_IMAGE:-your-registry/your-app:latest}
+  #   restart: unless-stopped
+  #   command: celery -A your_project beat -l info
+  #   volumes:
+  #     - media_volume:/app/media
+  #   env_file:
+  #     - .env
+  #   depends_on:
+  #     - db
+  #     - redis
+
+volumes:
+  pip_cache:
+  mysql_data:
+  redis_data:
